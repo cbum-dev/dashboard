@@ -1,0 +1,111 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  passwordHash String
+  name         String
+  avatarUrl    String?
+
+  ownedWorkspaces Workspace[]      @relation("WorkspaceOwner")
+  workspaces      WorkspaceMember[]
+  documents       Document[]
+  versions        DocumentVersion[]
+
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+}
+
+model Workspace {
+  id        String            @id @default(cuid())
+  name      String
+
+  ownerId   String
+  owner     User              @relation("WorkspaceOwner", fields: [ownerId], references: [id])
+
+  members   WorkspaceMember[]
+  documents Document[]
+
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+}
+
+model WorkspaceMember {
+  id          String        @id @default(cuid())
+
+  userId      String
+  user        User          @relation(fields: [userId], references: [id])
+
+  workspaceId String
+  workspace   Workspace     @relation(fields: [workspaceId], references: [id])
+
+  role        WorkspaceRole @default(MEMBER)
+
+  createdAt   DateTime      @default(now())
+
+  @@unique([userId, workspaceId])
+}
+
+enum WorkspaceRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+model Document {
+  id               String            @id @default(cuid())
+  title            String
+
+  workspaceId      String
+  workspace        Workspace         @relation(fields: [workspaceId], references: [id])
+
+  ownerId          String
+  owner            User              @relation(fields: [ownerId], references: [id])
+
+  currentVersionId String?   @unique
+  currentVersion   DocumentVersion?  @relation("CurrentVersion", fields: [currentVersionId], references: [id])
+
+  versions         DocumentVersion[]
+
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+}
+
+model DocumentVersion {
+  id           String          @id @default(cuid())
+
+  documentId   String
+  document     Document        @relation(fields: [documentId], references: [id])
+
+  currentOf    Document?       @relation("CurrentVersion")
+
+  authorId     String
+  author       User            @relation(fields: [authorId], references: [id])
+
+  title        String
+  snapshotType SnapshotType    @default(AUTO)
+
+  content      String          /// Serialized editor/CRDT state or text
+  changesSummary String?
+  changeCount  Int?
+
+  createdAt    DateTime        @default(now())
+}
+
+enum SnapshotType {
+  AUTO
+  MANUAL
+}
