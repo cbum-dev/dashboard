@@ -19,6 +19,49 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
     email: z.string().email(),
   });
 
+  app.get(
+    "/workspaces/:workspaceId/members",
+    { preHandler: [requireAuth] as any },
+    async (request: any, reply) => {
+      const userId = request.user.sub as string;
+      const { workspaceId } = request.params as { workspaceId: string };
+
+      const workspace = await prisma.workspace.findUnique({
+        where: { id: workspaceId },
+        include: {
+          members: {
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  email: true,
+                  name: true,
+                },
+              },
+            },
+            orderBy: { createdAt: "asc" },
+          },
+        },
+      });
+
+      if (!workspace) {
+        return reply.status(404).send({ error: "Workspace not found" });
+      }
+
+      const isMember = workspace.members.some((m) => m.userId === userId);
+      if (!isMember) {
+        return reply.status(403).send({ error: "Not a member of this workspace" });
+      }
+
+      return workspace.members.map((member) => ({
+        id: member.id,
+        role: member.role,
+        joinedAt: member.createdAt,
+        user: member.user,
+      }));
+    }
+  );
+
   app.get("/workspaces", { preHandler: [requireAuth] as any }, async (request: any) => {
     const userId = request.user.sub as string;
 
@@ -106,6 +149,15 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
         userId: invitedUser.id,
         workspaceId: workspace.id,
         role: "MEMBER",
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            email: true,
+            name: true,
+          },
+        },
       },
     });
 

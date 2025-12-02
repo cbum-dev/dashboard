@@ -79,6 +79,17 @@ export type DocumentSummary = {
   ownerId: string;
 };
 
+export type WorkspaceMember = {
+  id: string;
+  role: string;
+  joinedAt: string;
+  user: {
+    id: string;
+    email: string;
+    name: string;
+  };
+};
+
 export type DocumentVersion = {
   id: string;
   documentId: string;
@@ -106,6 +117,31 @@ export async function getWorkspaces(accessToken: string): Promise<Workspace[]> {
 
 export async function createWorkspace(accessToken: string, input: { name: string }): Promise<Workspace> {
   return request<Workspace>("/workspaces", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify(input),
+  });
+}
+
+export async function getWorkspaceMembers(
+  accessToken: string,
+  workspaceId: string
+): Promise<WorkspaceMember[]> {
+  return request<WorkspaceMember[]>(`/workspaces/${workspaceId}/members`, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+}
+
+export async function inviteWorkspaceMember(
+  accessToken: string,
+  workspaceId: string,
+  input: { email: string }
+): Promise<WorkspaceMember> {
+  return request<WorkspaceMember>(`/workspaces/${workspaceId}/invite`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${accessToken}`,
@@ -179,6 +215,6 @@ export async function restoreDocumentVersion(
       "Content-Type": "application/json",
       Authorization: `Bearer ${accessToken}`,
     },
-    body: JSON.stringify({}), // Add empty JSON body
+    body: JSON.stringify({}), 
   });
 }

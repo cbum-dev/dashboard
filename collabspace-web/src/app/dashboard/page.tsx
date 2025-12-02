@@ -7,10 +7,13 @@ import {
   type AuthUser,
   type Workspace,
   type DocumentSummary,
+  type WorkspaceMember,
   getWorkspaces,
   createWorkspace,
   getDocuments,
   createDocument,
+  getWorkspaceMembers,
+  inviteWorkspaceMember,
 } from "@/lib/api";
 
 export default function DashboardPage() {
@@ -21,10 +24,22 @@ export default function DashboardPage() {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(null);
   const [documents, setDocuments] = useState<DocumentSummary[]>([]);
+  const [members, setMembers] = useState<WorkspaceMember[]>([]);
   const [creatingWorkspace, setCreatingWorkspace] = useState(false);
   const [creatingDocument, setCreatingDocument] = useState(false);
+  const [inviting, setInviting] = useState(false);
   const [newWorkspaceName, setNewWorkspaceName] = useState("");
   const [newDocumentTitle, setNewDocumentTitle] = useState("");
+  const [inviteEmail, setInviteEmail] = useState("");
+
+  async function loadWorkspaceData(token: string, workspaceId: string) {
+    const [docs, memberList] = await Promise.all([
+      getDocuments(token, workspaceId),
+      getWorkspaceMembers(token, workspaceId),
+    ]);
+    setDocuments(docs);
+    setMembers(memberList);
+  }
 
   useEffect(() => {
     async function load() {
@@ -47,9 +62,9 @@ export default function DashboardPage() {
         const ws = await getWorkspaces(token);
         setWorkspaces(ws);
         if (ws.length > 0) {
-          setSelectedWorkspaceId(ws[0]!.id);
-          const docs = await getDocuments(token, ws[0]!.id);
-          setDocuments(docs);
+          const firstId = ws[0]!.id;
+          setSelectedWorkspaceId(firstId);
+          await loadWorkspaceData(token, firstId);
         }
       } catch {
         router.replace("/login");
@@ -78,6 +93,7 @@ export default function DashboardPage() {
       setNewWorkspaceName("");
       setSelectedWorkspaceId(ws.id);
       setDocuments([]);
+      setMembers([]);
     } finally {
       setCreatingWorkspace(false);
     }
@@ -86,8 +102,7 @@ export default function DashboardPage() {
   async function handleSelectWorkspace(id: string) {
     if (!accessToken) return;
     setSelectedWorkspaceId(id);
-    const docs = await getDocuments(accessToken, id);
-    setDocuments(docs);
+    await loadWorkspaceData(accessToken, id);
   }
 
   async function handleCreateDocument(e: React.FormEvent) {
@@ -102,6 +117,21 @@ export default function DashboardPage() {
       setNewDocumentTitle("");
     } finally {
       setCreatingDocument(false);
+    }
+  }
+
+  async function handleInviteMember(e: React.FormEvent) {
+    e.preventDefault();
+    if (!accessToken || !selectedWorkspaceId || !inviteEmail.trim()) return;
+    setInviting(true);
+    try {
+      const member = await inviteWorkspaceMember(accessToken, selectedWorkspaceId, {
+        email: inviteEmail.trim(),
+      });
+      setMembers((prev) => [...prev, member]);
+      setInviteEmail("");
+    } finally {
+      setInviting(false);
     }
   }
 
@@ -127,7 +157,7 @@ export default function DashboardPage() {
           </button>
         </div>
       </header>
-      <main className="mx-auto flex max-w-5xl gap-6 px-6 py-8">
+      <main className="mx-auto flex max-w-6xl gap-6 px-6 py-8">
         <aside className="w-64 rounded-xl border border-zinc-200 bg-white p-4 text-sm shadow-sm">
           <h2 className="mb-3 text-sm font-semibold">Workspaces</h2>
           <div className="space-y-2">
@@ -212,6 +242,52 @@ export default function DashboardPage() {
             <p className="text-xs text-zinc-500">Create a workspace to start.</p>
           )}
         </section>
+        <aside className="w-64 rounded-xl border border-zinc-200 bg-white p-4 text-sm shadow-sm">
+          <h2 className="mb-3 text-sm font-semibold">Members</h2>
+          {selectedWorkspaceId ? (
+            <>
+              {members.length === 0 ? (
+                <p className="text-xs text-zinc-500">No members yet.</p>
+              ) : (
+                <ul className="space-y-2 text-xs">
+                  {members.map((member) => (
+                    <li key={member.id} className="rounded-md border border-zinc-200 px-3 py-2">
+                      <p className="font-medium">{member.user.name}</p>
+                      <p className="text-[11px] text-zinc-500">{member.user.email}</p>
+                      <div className="mt-1 flex items-center justify-between text-[10px] uppercase text-zinc-500">
+                        <span>{member.role}</span>
+                        <span>
+                          {new Date(member.joinedAt).toLocaleDateString(undefined, {
+                            month: "short",
+                            day: "numeric",
+                          })}
+                        </span>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <form onSubmit={handleInviteMember} className="mt-4 space-y-2">
+                <input
+                  type="email"
+                  placeholder="Invite by email"
+                  value={inviteEmail}
+                  onChange={(e) => setInviteEmail(e.target.value)}
+                  className="w-full rounded-md border border-zinc-300 px-2 py-1 text-xs outline-none focus:border-zinc-900"
+                />
+                <button
+                  type="submit"
+                  disabled={inviting}
+                  className="w-full rounded-md bg-zinc-900 px-2 py-1 text-xs font-medium text-white hover:bg-zinc-800 disabled:opacity-60"
+                >
+                  {inviting ? "Inviting..." : "Invite"}
+                </button>
+              </form>
+            </>
+          ) : (
+            <p className="text-xs text-zinc-500">Select a workspace.</p>
+          )}
+        </aside>
       </main>
     </div>
   );

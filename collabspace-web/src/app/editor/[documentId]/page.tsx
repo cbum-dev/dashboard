@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import * as Y from "yjs";
 import { WebsocketProvider } from "y-websocket";
-import { EditorContent, useEditor } from "@tiptap/react";
+import { EditorContent, type JSONContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Collaboration from "@tiptap/extension-collaboration";
 import CollaborationCursor from "@tiptap/extension-collaboration-cursor";
@@ -14,6 +14,13 @@ import {
   createDocumentVersion,
   restoreDocumentVersion,
 } from "@/lib/api";
+import {
+  diff_match_patch,
+  DIFF_EQUAL,
+  DIFF_DELETE,
+  DIFF_INSERT,
+  type Diff,
+} from "diff-match-patch";
 
 const COLLAB_WS_URL =
   process.env.NEXT_PUBLIC_COLLAB_WS_URL ?? "ws://localhost:1234";
@@ -36,6 +43,57 @@ function getLocalUser() {
   return { name, color };
 }
 
+const dmp = new diff_match_patch();
+
+function jsonToPlainText(node?: JSONContent | null): string {
+  if (!node) return "";
+  if (node.type === "text" && typeof node.text === "string") {
+    return node.text;
+  }
+  if (Array.isArray(node.content)) {
+    return node.content
+      .map((child) => jsonToPlainText(child))
+      .join(node.type === "paragraph" ? "\n" : "");
+  }
+  return "";
+}
+
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;")
+    .replace(/\n/g, "<br />");
+}
+
+function buildSideBySideDiff(baseText: string, targetText: string) {
+  const diffs = dmp.diff_main(baseText, targetText);
+  dmp.diff_cleanupSemantic(diffs);
+  const leftParts: string[] = [];
+  const rightParts: string[] = [];
+
+  diffs.forEach((diff: Diff) => {
+    const [type, text] = diff;
+    const safe = escapeHtml(text);
+    if (type === DIFF_EQUAL) {
+      const span = `<span>${safe}</span>`;
+      leftParts.push(span);
+      rightParts.push(span);
+    } else if (type === DIFF_DELETE) {
+      leftParts.push(`<span class="bg-red-100 text-red-700 line-through">${safe}</span>`);
+    } else if (type === DIFF_INSERT) {
+      rightParts.push(`<span class="bg-green-100 text-green-700">${safe}</span>`);
+    }
+  });
+
+  return {
+    leftHtml: leftParts.join(""),
+    rightHtml: rightParts.join(""),
+  };
+}
+
 export default function DocumentEditorPage() {
   const router = useRouter();
   const params = useParams<{ documentId: string }>();
@@ -51,6 +109,9 @@ export default function DocumentEditorPage() {
   const autoSnapshotStartedRef = useRef(false);
   const dirtySinceLastSnapshotRef = useRef(false);
   const autoSnapshotIntervalRef = useRef<number | null>(null);
+  const [compareTarget, setCompareTarget] = useState<DocumentVersion | null>(null);
+  const [diffHtml, setDiffHtml] = useState<{ leftHtml: string; rightHtml: string } | null>(null);
+  const [showDiff, setShowDiff] = useState(false);
 
   const ydoc = useMemo(() => new Y.Doc(), []);
   const wsProvider = useMemo(
@@ -148,6 +209,21 @@ export default function DocumentEditorPage() {
     setVersions(list);
   }
 
+  async function handleCompare(version: DocumentVersion) {
+    if (!editor) return;
+    try {
+      const versionJson = JSON.parse(version.content) as JSONContent;
+      const versionText = jsonToPlainText(versionJson);
+      const currentText = jsonToPlainText(editor.getJSON());
+      const diff = buildSideBySideDiff(versionText, currentText);
+      setCompareTarget(version);
+      setDiffHtml(diff);
+      setShowDiff(true);
+    } catch {
+      // ignore invalid content
+    }
+  }
+
   async function handleManualSnapshot() {
     setSavingSnapshot(true);
     try {
@@ -236,18 +312,66 @@ export default function DocumentEditorPage() {
                   <span className="text-[10px] text-zinc-500">
                     {new Date(v.createdAt).toLocaleString()} – {v.author.name}
                   </span>
-                  <button
-                    onClick={() => handleRestore(v)}
-                    className="mt-1 self-start rounded-md bg-zinc-900 px-2 py-1 text-[10px] font-medium text-white hover:bg-zinc-800"
-                  >
-                    Restore
-                  </button>
+                  <div className="mt-1 flex gap-2">
+                    <button
+                      onClick={() => handleCompare(v)}
+                      className="rounded-md border border-zinc-300 px-2 py-1 text-[10px] font-medium text-zinc-700 hover:bg-zinc-100"
+                    >
+                      Compare
+                    </button>
+                    <button
+                      onClick={() => handleRestore(v)}
+                      className="rounded-md bg-zinc-900 px-2 py-1 text-[10px] font-medium text-white hover:bg-zinc-800"
+                    >
+                      Restore
+                    </button>
+                  </div>
                 </li>
               ))}
             </ul>
           )}
         </aside>
       </main>
+      {showDiff && compareTarget && diffHtml && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-5xl rounded-2xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-zinc-200 px-6 py-4">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-zinc-500">
+                  Comparing snapshot
+                </p>
+                <p className="text-sm font-semibold">
+                  {compareTarget.title} ({new Date(compareTarget.createdAt).toLocaleString()})
+                </p>
+              </div>
+              <button
+                onClick={() => setShowDiff(false)}
+                className="text-sm text-zinc-500 hover:text-zinc-900"
+              >
+                Close ✕
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-0 border-b border-zinc-200">
+              <div className="border-r border-zinc-200">
+                <div className="border-b border-zinc-200 bg-zinc-50 px-4 py-2 text-xs font-semibold uppercase text-zinc-500">
+                  Snapshot
+                </div>
+                <div className="max-h-[400px] overflow-auto px-4 py-3 text-sm leading-relaxed">
+                  <div dangerouslySetInnerHTML={{ __html: diffHtml.leftHtml }} />
+                </div>
+              </div>
+              <div>
+                <div className="border-b border-zinc-200 bg-zinc-50 px-4 py-2 text-xs font-semibold uppercase text-zinc-500">
+                  Current Draft
+                </div>
+                <div className="max-h-[400px] overflow-auto px-4 py-3 text-sm leading-relaxed">
+                  <div dangerouslySetInnerHTML={{ __html: diffHtml.rightHtml }} />
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
