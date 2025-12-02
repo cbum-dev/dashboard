@@ -10,6 +10,7 @@
     "outDir": "dist",
     "rootDir": "src",
     "types": ["node"],
+    "typeRoots": ["./src/types", "./node_modules/@types"],
     "resolveJsonModule": true
   },
   "include": ["src"]

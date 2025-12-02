@@ -1,35 +1,29 @@
-"use strict";
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.registerAuthRoutes = registerAuthRoutes;
-const prisma_1 = require("./prisma");
-const zod_1 = require("zod");
-const bcrypt_1 = __importDefault(require("bcrypt"));
-const registerSchema = zod_1.z.object({
-    email: zod_1.z.string().email(),
-    password: zod_1.z.string().min(6),
-    name: zod_1.z.string().min(1),
-    avatarUrl: zod_1.z.string().url().optional(),
+import { prisma } from "./prisma";
+import { z } from "zod";
+import bcrypt from "bcrypt";
+const registerSchema = z.object({
+    email: z.string().email(),
+    password: z.string().min(6),
+    name: z.string().min(1),
+    avatarUrl: z.string().url().optional(),
 });
-const loginSchema = zod_1.z.object({
-    email: zod_1.z.string().email(),
-    password: zod_1.z.string().min(6),
+const loginSchema = z.object({
+    email: z.string().email(),
+    password: z.string().min(6),
 });
-async function registerAuthRoutes(app) {
+export async function registerAuthRoutes(app) {
     app.post("/auth/register", async (request, reply) => {
         const parseResult = registerSchema.safeParse(request.body);
         if (!parseResult.success) {
             return reply.status(400).send({ error: "Invalid data" });
         }
         const { email, password, name, avatarUrl } = parseResult.data;
-        const existing = await prisma_1.prisma.user.findUnique({ where: { email } });
+        const existing = await prisma.user.findUnique({ where: { email } });
         if (existing) {
             return reply.status(409).send({ error: "Email already in use" });
         }
-        const passwordHash = await bcrypt_1.default.hash(password, 10);
-        const user = await prisma_1.prisma.user.create({
+        const passwordHash = await bcrypt.hash(password, 10);
+        const user = await prisma.user.create({
             data: {
                 email,
                 passwordHash,
@@ -56,11 +50,11 @@ async function registerAuthRoutes(app) {
             return reply.status(400).send({ error: "Invalid data" });
         }
         const { email, password } = parseResult.data;
-        const user = await prisma_1.prisma.user.findUnique({ where: { email } });
+        const user = await prisma.user.findUnique({ where: { email } });
         if (!user) {
             return reply.status(401).send({ error: "Invalid credentials" });
         }
-        const valid = await bcrypt_1.default.compare(password, user.passwordHash);
+        const valid = await bcrypt.compare(password, user.passwordHash);
         if (!valid) {
             return reply.status(401).send({ error: "Invalid credentials" });
         }
@@ -112,7 +106,7 @@ async function registerAuthRoutes(app) {
         ],
     }, async (request) => {
         const userId = request.user.sub;
-        const user = await prisma_1.prisma.user.findUnique({ where: { id: userId } });
+        const user = await prisma.user.findUnique({ where: { id: userId } });
         if (!user) {
             return null;
         }

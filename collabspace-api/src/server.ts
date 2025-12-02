@@ -6,6 +6,7 @@ import jwt from '@fastify/jwt';
 import { registerAuthRoutes } from './routes.auth';
 import { registerWorkspaceRoutes } from './routes.workspaces';
 import { registerDocumentRoutes } from './routes.documents';
+import { startCollaborationServer } from './collabServer';
 
 const app = Fastify({
   logger: true,
@@ -44,8 +45,14 @@ async function start() {
     await buildServer();
     const port = Number(process.env.PORT) || 4000;
     const host = '0.0.0.0';
+    const collabPort = Number(process.env.COLLAB_PORT) || 1234;
+    const collabHost = process.env.COLLAB_HOST || '0.0.0.0';
+
+    startCollaborationServer(collabPort, collabHost);
+
     await app.listen({ port, host });
     app.log.info(`API server running on http://${host}:${port}`);
+    app.log.info(`Collaboration server running on ws://${collabHost}:${collabPort}`);
   } catch (err) {
     app.log.error(err);
     process.exit(1);
