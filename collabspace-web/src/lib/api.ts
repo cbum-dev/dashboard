@@ -65,3 +65,120 @@ export async function fetchMe(accessToken: string): Promise<AuthUser | null> {
     },
   });
 }
+
+export type Workspace = {
+  id: string;
+  name: string;
+  role: string;
+};
+
+export type DocumentSummary = {
+  id: string;
+  title: string;
+  workspaceId: string;
+  ownerId: string;
+};
+
+export type DocumentVersion = {
+  id: string;
+  documentId: string;
+  authorId: string;
+  title: string;
+  snapshotType: "AUTO" | "MANUAL";
+  content: string;
+  changesSummary?: string | null;
+  changeCount?: number | null;
+  createdAt: string;
+  author: {
+    id: string;
+    email: string;
+    name: string;
+  };
+};
+
+export async function getWorkspaces(accessToken: string): Promise<Workspace[]> {
+  return request<Workspace[]>("/workspaces", {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+}
+
+export async function createWorkspace(accessToken: string, input: { name: string }): Promise<Workspace> {
+  return request<Workspace>("/workspaces", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify(input),
+  });
+}
+
+export async function getDocuments(accessToken: string, workspaceId: string): Promise<DocumentSummary[]> {
+  return request<DocumentSummary[]>(`/workspaces/${workspaceId}/documents`, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+}
+
+export async function createDocument(
+  accessToken: string,
+  workspaceId: string,
+  input: { title: string }
+): Promise<DocumentSummary> {
+  return request<DocumentSummary>(`/workspaces/${workspaceId}/documents`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify(input),
+  });
+}
+
+export async function getDocumentVersions(
+  accessToken: string,
+  documentId: string
+): Promise<DocumentVersion[]> {
+  return request<DocumentVersion[]>(`/documents/${documentId}/versions`, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+}
+
+export async function createDocumentVersion(
+  accessToken: string,
+  documentId: string,
+  input: {
+    title: string;
+    content: string;
+    changesSummary?: string;
+    changeCount?: number;
+    type?: "AUTO" | "MANUAL";
+  }
+): Promise<DocumentVersion> {
+  return request<DocumentVersion>(`/documents/${documentId}/versions`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify(input),
+  });
+}
+
+// In src/lib/api.ts, update the restoreDocumentVersion function
+export async function restoreDocumentVersion(
+  accessToken: string,
+  documentId: string,
+  versionId: string
+): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>(`/documents/${documentId}/restore/${versionId}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify({}), // Add empty JSON body
+  });
+}
