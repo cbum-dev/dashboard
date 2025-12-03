@@ -13,6 +13,7 @@ import {
   getDocumentVersions,
   createDocumentVersion,
   restoreDocumentVersion,
+  fetchMe,
 } from "@/lib/api";
 import {
   diff_match_patch,
@@ -25,22 +26,20 @@ import {
 const COLLAB_WS_URL =
   process.env.NEXT_PUBLIC_COLLAB_WS_URL ?? "ws://localhost:1234";
 
-function randomColor() {
-  const colors = ["#f97316", "#22c55e", "#3b82f6", "#a855f7", "#ec4899"];
-  return colors[Math.floor(Math.random() * colors.length)]!;
+const COLORS = ["#f97316", "#22c55e", "#3b82f6", "#a855f7", "#ec4899"] as const;
+
+function colorForId(id: string) {
+  let hash = 0;
+  for (let i = 0; i < id.length; i += 1) {
+    hash = (hash << 5) - hash + id.charCodeAt(i);
+    hash |= 0;
+  }
+  return COLORS[Math.abs(hash) % COLORS.length];
 }
 
-function getLocalUser() {
-  if (typeof window === "undefined") {
-    return { name: "Guest", color: "#3b82f6" };
-  }
-  const storedName = window.localStorage.getItem("collabspace:userName");
-  const storedColor = window.localStorage.getItem("collabspace:userColor");
-  const name = storedName || `User-${Math.floor(Math.random() * 1000)}`;
-  const color = storedColor || randomColor();
-  if (!storedName) window.localStorage.setItem("collabspace:userName", name);
-  if (!storedColor) window.localStorage.setItem("collabspace:userColor", color);
-  return { name, color };
+function getFallbackUser() {
+  const color = COLORS[Math.floor(Math.random() * COLORS.length)]!;
+  return { name: "Guest", color };
 }
 
 const dmp = new diff_match_patch();
@@ -100,8 +99,6 @@ export default function DocumentEditorPage() {
   const documentId = Array.isArray(params.documentId)
     ? params.documentId[0]
     : params.documentId;
-  const user = useMemo(() => getLocalUser(), []);
-
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [versions, setVersions] = useState<DocumentVersion[]>([]);
   const [loadingVersions, setLoadingVersions] = useState(true);
@@ -112,6 +109,10 @@ export default function DocumentEditorPage() {
   const [compareTarget, setCompareTarget] = useState<DocumentVersion | null>(null);
   const [diffHtml, setDiffHtml] = useState<{ leftHtml: string; rightHtml: string } | null>(null);
   const [showDiff, setShowDiff] = useState(false);
+  const [cursorUser, setCursorUser] = useState<{ name: string; color: string }>(getFallbackUser());
+  const [participants, setParticipants] = useState<
+    { clientId: number; name: string; color: string }[]
+  >([]);
 
   const ydoc = useMemo(() => new Y.Doc(), []);
   const wsProvider = useMemo(
@@ -128,7 +129,7 @@ export default function DocumentEditorPage() {
     extensions: [
       StarterKit.configure({ history: false }),
       Collaboration.configure({ document: ydoc }),
-      CollaborationCursor.configure({ provider: wsProvider, user }),
+      CollaborationCursor.configure({ provider: wsProvider, user: cursorUser }),
     ],
     autofocus: true,
   });
@@ -152,8 +153,49 @@ export default function DocumentEditorPage() {
         setLoadingVersions(false);
       }
     }
+    async function loadUser() {
+      try {
+        const me = await fetchMe(tokenString);
+        if (me) {
+          setCursorUser({ name: me.name, color: colorForId(me.id) });
+        }
+      } catch {
+        // ignore
+      }
+    }
     loadVersions();
+    void loadUser();
   }, [documentId, router]);
+
+  useEffect(() => {
+    if (!wsProvider) return;
+    wsProvider.awareness.setLocalStateField("user", cursorUser);
+  }, [wsProvider, cursorUser]);
+
+  useEffect(() => {
+    if (!wsProvider) return;
+    const awareness = wsProvider.awareness;
+    const handleChange = () => {
+      const states = Array.from(awareness.getStates().entries())
+        .map(([clientId, state]) => {
+          const awarenessUser = state?.user as { name?: string; color?: string } | undefined;
+          if (!awarenessUser?.name) return null;
+          return {
+            clientId,
+            name: awarenessUser.name,
+            color: awarenessUser.color ?? "#3b82f6",
+          };
+        })
+        .filter(Boolean) as { clientId: number; name: string; color: string }[];
+      setParticipants(states);
+    };
+    awareness.on("change", handleChange);
+    handleChange();
+    return () => {
+      awareness.off("change", handleChange);
+    };
+  }, [wsProvider]);
+
   useEffect(() => {
     if (!editor || !accessToken) return;
 
@@ -270,11 +312,32 @@ export default function DocumentEditorPage() {
         <div className="flex items-center gap-2 text-xs text-zinc-700">
           <span
             className="inline-flex h-2 w-2 rounded-full"
-            style={{ backgroundColor: user.color }}
+            style={{ backgroundColor: cursorUser.color }}
           />
-          <span>{user.name}</span>
+          <span>{cursorUser.name}</span>
         </div>
       </header>
+      <div className="border-b border-zinc-200 bg-white px-6 py-3 text-xs text-zinc-600">
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="font-medium text-zinc-700">Currently collaborating:</span>
+          {participants.length === 0 ? (
+            <span>No one else is here yet.</span>
+          ) : (
+            participants.map((person) => (
+              <span
+                key={person.clientId}
+                className="inline-flex items-center gap-1 rounded-full border border-zinc-200 px-2 py-1"
+              >
+                <span
+                  className="inline-flex h-2.5 w-2.5 rounded-full"
+                  style={{ backgroundColor: person.color }}
+                />
+                <span>{person.name}</span>
+              </span>
+            ))
+          )}
+        </div>
+      </div>
       <main className="mx-auto flex max-w-5xl gap-4 px-6 py-6">
         <section className="flex-1 rounded-xl border border-zinc-200 bg-white p-4 shadow-sm">
           <EditorContent editor={editor} className="prose max-w-none" />
